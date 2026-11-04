@@ -1,5 +1,0 @@
-Home: index.html
-Category: categories.html?cat=জাতীয়
-Article: article.html?news=POST_ID
-Admin: admin.html
-Blog: index.html?view=blog
