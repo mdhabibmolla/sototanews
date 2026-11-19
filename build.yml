@@ -1,0 +1,261 @@
+name: Build APK
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Create project files
+        run: |
+          set -e
+          P=proj
+          mkdir -p $P/app/src/main/java/com/sotota/panel $P/app/src/main/res/mipmap-xxxhdpi $P/app/src/main/res/values
+
+          cat > $P/settings.gradle <<'EOF'
+          pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
+          dependencyResolutionManagement { repositories { google(); mavenCentral() } }
+          rootProject.name = 'SototaPanel'
+          include ':app'
+          EOF
+
+          cat > $P/build.gradle <<'EOF'
+          plugins { id 'com.android.application' version '8.5.2' apply false }
+          EOF
+
+          cat > $P/gradle.properties <<'EOF'
+          android.useAndroidX=true
+          org.gradle.jvmargs=-Xmx2g
+          EOF
+
+          cat > $P/app/build.gradle <<'EOF'
+          plugins { id 'com.android.application' }
+          android {
+              namespace 'com.sotota.panel'
+              compileSdk 34
+              defaultConfig {
+                  applicationId 'com.sotota.panel'
+                  minSdk 24
+                  targetSdk 34
+                  versionCode 1
+                  versionName '1.0'
+              }
+              compileOptions {
+                  sourceCompatibility JavaVersion.VERSION_17
+                  targetCompatibility JavaVersion.VERSION_17
+              }
+          }
+          dependencies { implementation 'androidx.webkit:webkit:1.11.0' }
+          EOF
+
+          cat > $P/app/src/main/res/values/strings.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <string name="app_name">সততা প্যানেল</string>
+          </resources>
+          EOF
+
+          cat > $P/app/src/main/AndroidManifest.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <uses-permission android:name="android.permission.INTERNET" />
+              <application
+                  android:label="@string/app_name"
+                  android:icon="@mipmap/ic_launcher"
+                  android:usesCleartextTraffic="false"
+                  android:theme="@android:style/Theme.Material.Light.NoActionBar">
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true"
+                      android:configChanges="orientation|screenSize|keyboardHidden|screenLayout|smallestScreenSize">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+              </application>
+          </manifest>
+          EOF
+
+          cat > $P/app/src/main/java/com/sotota/panel/MainActivity.java <<'EOF'
+          package com.sotota.panel;
+
+          import android.app.Activity;
+          import android.content.ActivityNotFoundException;
+          import android.content.Intent;
+          import android.net.Uri;
+          import android.os.Bundle;
+          import android.webkit.ConsoleMessage;
+          import android.webkit.CookieManager;
+          import android.webkit.ValueCallback;
+          import android.webkit.WebChromeClient;
+          import android.webkit.WebResourceRequest;
+          import android.webkit.WebResourceError;
+          import android.webkit.WebResourceResponse;
+          import android.webkit.WebSettings;
+          import android.webkit.WebView;
+          import android.webkit.WebViewClient;
+          import android.widget.Toast;
+          import androidx.webkit.WebSettingsCompat;
+          import androidx.webkit.WebViewFeature;
+          import java.util.Collections;
+
+          public class MainActivity extends Activity {
+              static final String START_URL = "https://sototanews.gamer.free/admin/panel/login/8/1/2/9/2/";
+              static final String HOST = "sototanews.gamer.free";
+              static final int FILE_REQ = 1001;
+
+              WebView web;
+              ValueCallback<Uri[]> filePathCallback;
+
+              @Override
+              protected void onCreate(Bundle saved) {
+                  super.onCreate(saved);
+                  web = new WebView(this);
+                  setContentView(web);
+
+                  WebSettings s = web.getSettings();
+                  s.setJavaScriptEnabled(true);
+                  s.setDomStorageEnabled(true);
+                  s.setAllowFileAccess(false);
+
+                  // Chrome-er moto user-agent ("; wv" ar "Version/x.x" bad)
+                  String ua = s.getUserAgentString().replace("; wv", "").replaceAll("Version/[0-9.]+ ", "");
+                  s.setUserAgentString(ua);
+
+                  // X-Requested-With (app-er package-er naam) header pathano bondho
+                  if (WebViewFeature.isFeatureSupported(WebViewFeature.REQUESTED_WITH_HEADER_ALLOW_LIST)) {
+                      WebSettingsCompat.setRequestedWithHeaderOriginAllowList(s, Collections.<String>emptySet());
+                  }
+
+                  CookieManager cm = CookieManager.getInstance();
+                  cm.setAcceptCookie(true);
+                  cm.setAcceptThirdPartyCookies(web, true);
+
+                  web.setWebViewClient(new WebViewClient() {
+                      @Override
+                      public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest r) {
+                          Uri u = r.getUrl();
+                          if (HOST.equals(u.getHost())) return false;
+                          try { startActivity(new Intent(Intent.ACTION_VIEW, u)); } catch (ActivityNotFoundException e) { }
+                          return true;
+                      }
+
+                      @Override
+                      public void onReceivedHttpError(WebView v, WebResourceRequest r, WebResourceResponse e) {
+                          // Debug: je request-e HTTP error ashe tar code ar path dekhay
+                          Toast.makeText(MainActivity.this, "HTTP " + e.getStatusCode() + " " + r.getUrl().getPath(), Toast.LENGTH_LONG).show();
+                      }
+
+                      @Override
+                      public void onReceivedError(WebView v, WebResourceRequest r, WebResourceError e) {
+                          // Debug: network error (je request fail holo tar host/path)
+                          Toast.makeText(MainActivity.this, "NET " + e.getDescription() + " " + r.getUrl().getHost() + r.getUrl().getPath(), Toast.LENGTH_LONG).show();
+                      }
+                  });
+
+                  // Photo/file upload
+                  web.setWebChromeClient(new WebChromeClient() {
+                      @Override
+                      public boolean onConsoleMessage(ConsoleMessage m) {
+                          // Debug: JavaScript error screen-e dekhay
+                          if (m.messageLevel() == ConsoleMessage.MessageLevel.ERROR) {
+                              Toast.makeText(MainActivity.this, "JS: " + m.message(), Toast.LENGTH_LONG).show();
+                          }
+                          return false;
+                      }
+
+                      @Override
+                      public boolean onShowFileChooser(WebView w, ValueCallback<Uri[]> cb, FileChooserParams p) {
+                          if (filePathCallback != null) filePathCallback.onReceiveValue(null);
+                          filePathCallback = cb;
+                          try {
+                              startActivityForResult(p.createIntent(), FILE_REQ);
+                          } catch (ActivityNotFoundException e) {
+                              filePathCallback = null;
+                              return false;
+                          }
+                          return true;
+                      }
+                  });
+
+                  if (saved == null) web.loadUrl(START_URL); else web.restoreState(saved);
+              }
+
+              @Override
+              protected void onSaveInstanceState(Bundle out) {
+                  super.onSaveInstanceState(out);
+                  web.saveState(out);
+              }
+
+              @Override
+              protected void onActivityResult(int req, int res, Intent data) {
+                  if (req == FILE_REQ && filePathCallback != null) {
+                      filePathCallback.onReceiveValue(WebChromeClient.FileChooserParams.parseResult(res, data));
+                      filePathCallback = null;
+                      return;
+                  }
+                  super.onActivityResult(req, res, data);
+              }
+
+              @Override
+              public void onBackPressed() {
+                  if (web.canGoBack()) web.goBack(); else super.onBackPressed();
+              }
+          }
+          EOF
+
+          base64 -d > $P/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png <<'EOF'
+          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
+          EOF
+
+      - name: Build APK
+        working-directory: proj
+        run: gradle assembleDebug --no-daemon
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Sotota-Panel-APK
+          path: proj/app/build/outputs/apk/debug/app-debug.apk
